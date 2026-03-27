@@ -1,0 +1,92 @@
+2026-03-27 18:20:27 [WARNING ] mt5.connector — MetaTrader5 package not found — MT5Connection will run in stub mode.
+2026-03-27 18:20:27 [WARNING ] mt5.executor — MetaTrader5 not installed — TradeExecutor will run in stub mode.
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain initialized
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: MA_Crossover for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.ma_crossover — MA Crossover Strategy initialized: fast=10, slow=30
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: EMA_Crossover for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.ema_crossover — EMA Crossover Strategy initialized: fast=12, slow=26
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: RSI for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.rsi_strategy — RSI Strategy initialized: period=14, oversold=30, overbought=70
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: MACD for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.macd_strategy — MACD Strategy initialized: fast=12, slow=26, signal=9
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: Bollinger for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.bollinger_bands — Bollinger Bands Strategy initialized: period=20, std_dev=2.0
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: MeanReversion for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.mean_reversion — Mean Reversion Strategy initialized: period=20, std_dev=2.0
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: Breakout for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.breakout — Breakout Strategy initialized: lookback=20, threshold=0.02
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: Stochastic for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.stochastic — Stochastic Strategy initialized: k=14, d=3, oversold=20, overbought=80
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: SMC_ICT for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.smc_ict — SMC ICT initialized for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.base — Initialized strategy: ITS8OS for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.its_8_os — ITS-8-OS Strategy initialized for XAUUSD
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MA_Crossover
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered EMA_Crossover
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered RSI
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MACD
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Bollinger
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MeanReversion
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Breakout
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Stochastic
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered SMC_ICT
+2026-03-27 18:20:28 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered ITS8OS
+2026-03-27 18:20:28 [INFO    ] live_bot — Registered 10 strategies.
+2026-03-27 18:20:28 [WARNING ] live_bot — AI models not available (No module named 'sklearn') — strategy-only mode.
+2026-03-27 18:20:28 [INFO    ] live_bot — LiveTradingBot initialised — symbol=XAUUSD, dry_run=True
+2026-03-27 18:20:28 [INFO    ] live_bot — ────────────────────────────────────────────────────────────
+2026-03-27 18:20:28 [INFO    ] live_bot —   ZEZO Live Trading Bot — Starting Up
+2026-03-27 18:20:28 [INFO    ] live_bot — ────────────────────────────────────────────────────────────
+2026-03-27 18:20:28 [INFO    ] live_bot — [DRY-RUN] Skipping MT5 connection.
+2026-03-27 18:20:28 [INFO    ] live_bot — ────────────────────────────────────────────────────────────
+2026-03-27 18:20:28 [INFO    ] live_bot —   Watching XAUUSD — M15  [DRY-RUN]
+2026-03-27 18:20:28 [INFO    ] live_bot — ────────────────────────────────────────────────────────────
+2026-03-27 18:20:28 [INFO    ] live_bot — [2026-03-27 18:20:28] ── New candle cycle ─────────────────────────────
+2026-03-27 18:20:28 [INFO    ] live_bot — Account  balance=400.00  equity=400.00  free_margin=400.00
+2026-03-27 18:20:28 [INFO    ] live_bot — Open positions: 0
+2026-03-27 18:20:28 [INFO    ] live_bot — Brain stats: {'total_analyses': 0, 'consensus_reached': 0, 'consensus_rate': 0, 'bullish_consensus': 0, 'bearish_consensus': 0, 'neutral_count': 0, 'average_confidence': 0.0, 'registered_strategies': 10, 'strategy_weights': {'MA_Crossover': 0.09999999999999998, 'EMA_Crossover': 0.09999999999999998, 'RSI': 0.09999999999999998, 'MACD': 0.09999999999999998, 'Bollinger': 0.09999999999999998, 'MeanReversion': 0.09999999999999998, 'Breakout': 0.09999999999999998, 'Stochastic': 0.09999999999999998, 'SMC_ICT': 0.09999999999999998, 'ITS8OS': 0.09999999999999998}, 'strategy_performance': {'MA_Crossover': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'EMA_Crossover': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'RSI': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'MACD': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Bollinger': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'MeanReversion': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Breakout': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Stochastic': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'SMC_ICT': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'ITS8OS': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}}}
+2026-03-27 18:20:28 [ERROR   ] strategies.its_8_os — Error in ITS-8-OS analysis: 'float' object has no attribute 'get'
+2026-03-27 18:20:28 [INFO    ] live_bot — No consensus this cycle: Insufficient strategies (1 < 2)
+2026-03-27 18:20:28 [INFO    ] live_bot — Waiting 577s for next candle …
+2026-03-27 18:20:43 [WARNING ] mt5.connector — MetaTrader5 package not found — MT5Connection will run in stub mode.
+2026-03-27 18:20:43 [WARNING ] mt5.executor — MetaTrader5 not installed — TradeExecutor will run in stub mode.
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain initialized
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: MA_Crossover for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.ma_crossover — MA Crossover Strategy initialized: fast=10, slow=30
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: EMA_Crossover for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.ema_crossover — EMA Crossover Strategy initialized: fast=12, slow=26
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: RSI for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.rsi_strategy — RSI Strategy initialized: period=14, oversold=30, overbought=70
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: MACD for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.macd_strategy — MACD Strategy initialized: fast=12, slow=26, signal=9
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: Bollinger for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.bollinger_bands — Bollinger Bands Strategy initialized: period=20, std_dev=2.0
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: MeanReversion for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.mean_reversion — Mean Reversion Strategy initialized: period=20, std_dev=2.0
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: Breakout for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.breakout — Breakout Strategy initialized: lookback=20, threshold=0.02
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: Stochastic for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.stochastic — Stochastic Strategy initialized: k=14, d=3, oversold=20, overbought=80
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: SMC_ICT for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.smc_ict — SMC ICT initialized for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.base — Initialized strategy: ITS8OS for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.its_8_os — ITS-8-OS Strategy initialized for XAUUSD
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MA_Crossover
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered EMA_Crossover
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered RSI
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MACD
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Bollinger
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered MeanReversion
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Breakout
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered Stochastic
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered SMC_ICT
+2026-03-27 18:20:44 [INFO    ] strategies.strategy_brain — Strategy Brain: Registered ITS8OS
+2026-03-27 18:20:44 [INFO    ] live_bot — Registered 10 strategies.
+2026-03-27 18:20:44 [WARNING ] live_bot — AI models not available (No module named 'sklearn') — strategy-only mode.
+2026-03-27 18:20:44 [INFO    ] live_bot — LiveTradingBot initialised — symbol=XAUUSD, dry_run=True
+2026-03-27 18:20:44 [INFO    ] live_bot — [2026-03-27 18:20:44] ── New candle cycle ─────────────────────────────
+2026-03-27 18:20:44 [INFO    ] live_bot — Account  balance=400.00  equity=400.00  free_margin=400.00
+2026-03-27 18:20:44 [INFO    ] live_bot — Open positions: 0
+2026-03-27 18:20:44 [INFO    ] live_bot — Brain stats: {'total_analyses': 0, 'consensus_reached': 0, 'consensus_rate': 0, 'bullish_consensus': 0, 'bearish_consensus': 0, 'neutral_count': 0, 'average_confidence': 0.0, 'registered_strategies': 10, 'strategy_weights': {'MA_Crossover': 0.09999999999999998, 'EMA_Crossover': 0.09999999999999998, 'RSI': 0.09999999999999998, 'MACD': 0.09999999999999998, 'Bollinger': 0.09999999999999998, 'MeanReversion': 0.09999999999999998, 'Breakout': 0.09999999999999998, 'Stochastic': 0.09999999999999998, 'SMC_ICT': 0.09999999999999998, 'ITS8OS': 0.09999999999999998}, 'strategy_performance': {'MA_Crossover': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'EMA_Crossover': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'RSI': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'MACD': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Bollinger': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'MeanReversion': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Breakout': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'Stochastic': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'SMC_ICT': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}, 'ITS8OS': {'total_signals': 0, 'correct_signals': 0, 'win_rate': 0.5, 'average_confidence': 0.5, 'total_pnl': 0.0}}}
+2026-03-27 18:20:44 [ERROR   ] strategies.its_8_os — Error in ITS-8-OS analysis: 'float' object has no attribute 'get'
+2026-03-27 18:20:44 [INFO    ] live_bot — No consensus this cycle: No consensus: Buy 54.6%, Sell 45.4%
