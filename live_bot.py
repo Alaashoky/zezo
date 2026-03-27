@@ -12,6 +12,9 @@ Usage
   python live_bot.py --symbol XAUUSD --timeframe M15 --dry-run
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # loads .env file automatically
+
 import argparse
 import logging
 import os
