@@ -367,6 +367,157 @@ class StrategyBrain:
 
         return correlations
 
+    def analyze_with_ai(
+        self,
+        data: Dict[str, Any],
+        ai_prediction: Optional[Dict[str, Any]] = None,
+        ai_weight: float = 0.3,
+    ) -> Dict[str, Any]:
+        """
+        Combine strategy consensus with an AI model prediction.
+
+        Parameters
+        ----------
+        data          : OHLCV bar dict passed to every strategy
+        ai_prediction : output dict from MarketPredictor.predict()
+                        (must contain 'signal_type' and 'confidence' keys)
+        ai_weight     : how much weight to give the AI signal vs strategy consensus
+                        (0 = ignore AI, 1 = ignore strategies)
+
+        Returns
+        -------
+        Same structure as analyze_joint(), with an extra 'ai_contribution' key.
+        Falls back to strategy-only consensus if ai_prediction is None or fails.
+        """
+        strategy_result = self.analyze_joint(data)
+
+        if ai_prediction is None:
+            strategy_result["ai_contribution"] = None
+            return strategy_result
+
+        try:
+            ai_signal_type = ai_prediction.get("signal_type")
+            ai_confidence = float(ai_prediction.get("confidence", 0.0))
+
+            if ai_signal_type is None:
+                ai_signal = ai_prediction.get("signal")
+                ai_signal_type = getattr(ai_signal, "signal_type", None) if ai_signal else None
+
+            # If strategy consensus was reached, blend the confidence
+            if strategy_result.get("consensus_reached") and strategy_result.get("consensus_signal"):
+                cs = strategy_result["consensus_signal"]
+                strategy_weight = 1.0 - ai_weight
+
+                if cs.signal_type == ai_signal_type:
+                    # agreement — boost confidence
+                    blended_confidence = min(
+                        cs.confidence * strategy_weight + ai_confidence * ai_weight, 1.0
+                    )
+                    cs_dict = cs.__dict__.copy() if hasattr(cs, "__dict__") else {}
+                    cs_dict["confidence"] = blended_confidence
+                    # rebuild Signal with updated confidence
+                    from strategies.base import Signal
+                    from datetime import datetime, timezone
+
+                    blended_signal = Signal(
+                        signal_type=cs.signal_type,
+                        symbol=cs.symbol,
+                        price=cs.price,
+                        timestamp=datetime.now(timezone.utc),
+                        confidence=blended_confidence,
+                        metadata={
+                            **(cs.metadata or {}),
+                            "ai_confidence": ai_confidence,
+                            "ai_signal_type": str(ai_signal_type),
+                            "ai_weight": ai_weight,
+                            "blend": "agreement",
+                        },
+                    )
+                    strategy_result["consensus_signal"] = blended_signal
+                    strategy_result["ai_contribution"] = {
+                        "ai_signal_type": str(ai_signal_type),
+                        "ai_confidence": ai_confidence,
+                        "blend": "agreement",
+                        "blended_confidence": blended_confidence,
+                    }
+                else:
+                    # disagreement — reduce confidence
+                    reduced_confidence = max(
+                        cs.confidence * strategy_weight - ai_confidence * ai_weight * 0.5, 0.0
+                    )
+                    from strategies.base import Signal
+                    from datetime import datetime, timezone
+
+                    reduced_signal = Signal(
+                        signal_type=cs.signal_type,
+                        symbol=cs.symbol,
+                        price=cs.price,
+                        timestamp=datetime.now(timezone.utc),
+                        confidence=reduced_confidence,
+                        metadata={
+                            **(cs.metadata or {}),
+                            "ai_confidence": ai_confidence,
+                            "ai_signal_type": str(ai_signal_type),
+                            "ai_weight": ai_weight,
+                            "blend": "disagreement",
+                        },
+                    )
+                    strategy_result["consensus_signal"] = reduced_signal
+                    # suppress consensus if confidence drops too low
+                    if reduced_confidence < self.consensus_threshold * 0.5:
+                        strategy_result["consensus_reached"] = False
+                        strategy_result["reason"] = (
+                            f"Consensus suppressed by AI disagreement "
+                            f"(confidence reduced to {reduced_confidence:.2f})"
+                        )
+                    strategy_result["ai_contribution"] = {
+                        "ai_signal_type": str(ai_signal_type),
+                        "ai_confidence": ai_confidence,
+                        "blend": "disagreement",
+                        "reduced_confidence": reduced_confidence,
+                    }
+            else:
+                # no strategy consensus — let AI signal stand alone if confident enough
+                if ai_confidence >= self.consensus_threshold and ai_signal_type is not None:
+                    from strategies.base import Signal, SignalType
+                    from datetime import datetime, timezone
+
+                    current_price = data.get("close") or (
+                        data["prices"][-1].get("close") if data.get("prices") else 0.0
+                    )
+                    ai_only_signal = Signal(
+                        signal_type=ai_signal_type,
+                        symbol=data.get("symbol", "UNKNOWN"),
+                        price=float(current_price),
+                        timestamp=datetime.now(timezone.utc),
+                        confidence=ai_confidence * ai_weight,
+                        metadata={
+                            "source": "ai_only",
+                            "ai_confidence": ai_confidence,
+                            "ai_weight": ai_weight,
+                        },
+                    )
+                    strategy_result["consensus_reached"] = True
+                    strategy_result["consensus_signal"] = ai_only_signal
+                    strategy_result["reason"] = "AI-only signal (no strategy consensus)"
+                    strategy_result["ai_contribution"] = {
+                        "ai_signal_type": str(ai_signal_type),
+                        "ai_confidence": ai_confidence,
+                        "blend": "ai_only",
+                    }
+                else:
+                    strategy_result["ai_contribution"] = {
+                        "ai_signal_type": str(ai_signal_type) if ai_signal_type else None,
+                        "ai_confidence": ai_confidence,
+                        "blend": "none",
+                    }
+
+        except Exception as e:
+            logger.error(f"Error blending AI prediction: {e}")
+            strategy_result["ai_contribution"] = {"error": str(e)}
+
+        return strategy_result
+
     def __repr__(self) -> str:
         return (
             f"StrategyBrain("
