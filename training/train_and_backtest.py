@@ -233,10 +233,18 @@ def run_strategy_backtest(
     backtest_df: pd.DataFrame,
     symbol: str,
     initial_capital: float,
+    predictor=None,  # optional MarketPredictor for AI+Strategy blending
 ) -> Tuple[Dict[str, Any], list]:
     """
     Run all 10 strategies via StrategyBrain on the out-of-sample backtest data
     and simulate a simple equity curve based on consensus signals.
+
+    When *predictor* is supplied the backtest mirrors live_bot.py behaviour:
+    each bar first queries the AI ensemble (LSTM + RF + XGBoost) via
+    ``predictor.predict()``, then combines the result with the strategy
+    consensus through ``brain.analyze_with_ai()``.  If the predictor is
+    unavailable or raises an exception the loop falls back to the
+    strategy-only ``brain.analyze_joint()`` path transparently.
     """
     logger.info("=" * 60)
     logger.info("PHASE 3 — STRATEGY BACKTEST (out-of-sample)")
@@ -307,8 +315,22 @@ def run_strategy_backtest(
             "symbol": symbol,
             "prices": all_bars[: i + 1],
         }
+
+        # Try AI + Strategies (like live_bot.py does)
+        ai_result = None
+        if predictor is not None:
+            try:
+                window = backtest_df.iloc[: i + 1]
+                ai_result = predictor.predict(window, symbol=symbol)
+            except Exception as exc:
+                logger.debug("AI prediction failed at bar %d: %s", i, exc)
+                ai_result = None
+
         try:
-            result = brain.analyze_joint(bar_dict)
+            if ai_result is not None:
+                result = brain.analyze_with_ai(bar_dict, ai_result)
+            else:
+                result = brain.analyze_joint(bar_dict)
         except Exception:
             result = None
 
@@ -466,8 +488,9 @@ def main() -> None:
 
     # ── Step 5: Strategy backtest (out-of-sample) ────────────────────────
     if len(backtest_df) >= 52:
+        predictor = trainer.get_market_predictor()
         strategy_report, signals = run_strategy_backtest(
-            backtest_df, args.symbol, args.initial_capital
+            backtest_df, args.symbol, args.initial_capital, predictor=predictor
         )
         logger.info(format_strategy_report(strategy_report))
     else:
