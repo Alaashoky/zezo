@@ -284,22 +284,35 @@ def run_strategy_backtest(
 
     min_history = 50  # warm-up candles
 
+    # Pre-convert all rows to dicts once for efficiency
+    cols = ["open", "high", "low", "close"]
+    if "volume" in backtest_df.columns:
+        cols.append("volume")
+    sub = backtest_df[cols].copy()
+    if "volume" not in sub.columns:
+        sub["volume"] = 0.0
+    all_bars = sub[["open", "high", "low", "close", "volume"]].astype(float).to_dict("records")
+
     for i in range(min_history, len(backtest_df) - 1):
-        window = backtest_df.iloc[: i + 1]
+        bar_dict = {
+            **all_bars[i],
+            "symbol": symbol,
+            "prices": all_bars[: i + 1],
+        }
         try:
-            result = brain.analyze(window)
+            result = brain.analyze_joint(bar_dict)
         except Exception:
             result = None
 
         direction = 0
         signal_label = "HOLD"
 
-        if result and result.get("signal"):
-            sig = result.get("signal_type")
-            if sig == SignalType.BUY or str(sig) in ("BUY", "SignalType.BUY"):
+        if result and result.get("consensus_reached") and result.get("consensus_signal"):
+            sig = result["consensus_signal"]
+            if sig.signal_type == SignalType.BUY:
                 direction = 1
                 signal_label = "BUY"
-            elif sig == SignalType.SELL or str(sig) in ("SELL", "SignalType.SELL"):
+            elif sig.signal_type == SignalType.SELL:
                 direction = -1
                 signal_label = "SELL"
 
@@ -345,7 +358,7 @@ def run_strategy_backtest(
     )  # 96 M15 candles per day
 
     # per-strategy performance (from brain stats)
-    brain_stats = brain.get_stats()
+    brain_stats = brain.get_statistics()
 
     report = {
         "symbol": symbol,
