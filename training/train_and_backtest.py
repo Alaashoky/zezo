@@ -250,21 +250,30 @@ def run_strategy_backtest(
         ITS8OSStrategy,
     )
 
-    cfg = StrategyConfig(symbol=symbol)
-    brain = StrategyBrain(symbol=symbol)
-    for Strat in [
-        MovingAverageCrossover,
-        EMAcrossoverStrategy,
-        RSIStrategy,
-        MACDStrategy,
-        BollingerBandsStrategy,
-        MeanReversionStrategy,
-        BreakoutStrategy,
-        StochasticStrategy,
-        SMCICTStrategy,
-        ITS8OSStrategy,
-    ]:
-        brain.register_strategy(Strat(cfg))
+    timeframe = "M15"
+    brain = StrategyBrain(config={
+        "min_strategies_required": 2,
+        "consensus_threshold": 0.6,
+        "performance_weight": 0.4,
+        "confidence_weight": 0.6,
+    })
+
+    strategies = [
+        MovingAverageCrossover(StrategyConfig(name="MA_Crossover", symbol=symbol, timeframe=timeframe)),
+        EMAcrossoverStrategy(StrategyConfig(name="EMA_Crossover", symbol=symbol, timeframe=timeframe)),
+        RSIStrategy(StrategyConfig(name="RSI", symbol=symbol, timeframe=timeframe)),
+        MACDStrategy(StrategyConfig(name="MACD", symbol=symbol, timeframe=timeframe)),
+        BollingerBandsStrategy(StrategyConfig(name="Bollinger", symbol=symbol, timeframe=timeframe)),
+        MeanReversionStrategy(StrategyConfig(name="MeanReversion", symbol=symbol, timeframe=timeframe)),
+        BreakoutStrategy(StrategyConfig(name="Breakout", symbol=symbol, timeframe=timeframe)),
+        StochasticStrategy(StrategyConfig(name="Stochastic", symbol=symbol, timeframe=timeframe)),
+        SMCICTStrategy(StrategyConfig(name="SMC_ICT", symbol=symbol, timeframe=timeframe)),
+        ITS8OSStrategy(StrategyConfig(name="ITS8OS", symbol=symbol, timeframe=timeframe)),
+    ]
+
+    for s in strategies:
+        s.start()
+        brain.register_strategy(s)
 
     # Walk-forward simulation over the backtest period
     close = backtest_df["close"].values
