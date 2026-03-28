@@ -22,6 +22,9 @@ Usage
 
     # Skip LSTM (faster, no GPU required)
     python training/train_and_backtest.py --csv data/XAUUSD_M15_historical.csv --skip-lstm
+
+    # Backtest only — load saved models, skip retraining (~1-5 minutes)
+    python -m training.train_and_backtest --csv data/XAUUSD_M15_historical.csv --backtest-only --initial-capital 400
 """
 
 import argparse
@@ -98,6 +101,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=10_000.0,
         help="Simulated starting capital for backtest (default: 10000)",
+    )
+    parser.add_argument(
+        "--backtest-only",
+        action="store_true",
+        help="Skip training; load saved models from --model-dir and run backtest only",
     )
     return parser.parse_args()
 
@@ -431,12 +439,23 @@ def main() -> None:
     # ── Step 2: Split data ───────────────────────────────────────────────
     train_df, valid_df, backtest_df = split_data(df)
 
-    if len(train_df) < 200:
-        logger.error("Training set too small (< 200 candles). Check your data.")
-        sys.exit(1)
+    if args.backtest_only:
+        # Load saved models instead of training
+        from training.trainer import Trainer
 
-    # ── Step 3: Train AI models ──────────────────────────────────────────
-    trainer, train_results = run_training(train_df, args.model_dir, args.skip_lstm)
+        logger.info("=" * 60)
+        logger.info("BACKTEST-ONLY MODE — loading saved models")
+        logger.info("=" * 60)
+        trainer = Trainer(model_dir=args.model_dir)
+        trainer.load_all_models()
+        train_results = {}  # no training results in backtest-only mode
+    else:
+        if len(train_df) < 200:
+            logger.error("Training set too small (< 200 candles). Check your data.")
+            sys.exit(1)
+
+        # ── Step 3: Train AI models ──────────────────────────────────────────
+        trainer, train_results = run_training(train_df, args.model_dir, args.skip_lstm)
 
     # ── Step 4: Validate on validation period ────────────────────────────
     if len(valid_df) >= 102:
@@ -471,7 +490,8 @@ def main() -> None:
             f"return: {strategy_report.get('total_return_pct', 0):+.2f}%, "
             f"max DD: {strategy_report.get('max_drawdown_pct', 0):.2f}%"
         )
-    logger.info(f"Models saved → {args.model_dir}/")
+    if not args.backtest_only:
+        logger.info(f"Models saved → {args.model_dir}/")
 
 
 if __name__ == "__main__":
