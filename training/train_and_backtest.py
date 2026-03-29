@@ -2,44 +2,41 @@
 """
 training/train_and_backtest.py — Full Training + Backtest Pipeline
 ====================================================================
-Loads historical OHLCV data, splits it into train/validation/backtest
-periods, trains all AI models, validates them, and then runs the
-multi-strategy StrategyBrain over the out-of-sample backtest window.
+This is now a thin wrapper around the two separate modules:
 
-Data split (XAUUSD M15, 2020 → present)
------------------------------------------
-  Training   : 2020-01-01 → 2024-06-30  (4.5 years)
-  Validation : 2024-07-01 → 2025-06-30  (1 year)
-  Backtest   : 2025-07-01 → present      (~9 months, out-of-sample)
+  * training/train.py    — trains and saves AI models
+  * training/backtest.py — backtests strategies and/or AI models
 
-Usage
------
-    # Use a pre-downloaded CSV
-    python training/train_and_backtest.py --csv data/XAUUSD_M15_historical.csv
+It keeps the original ``--csv``, ``--from-mt5``, ``--skip-lstm``,
+``--initial-capital``, and ``--backtest-only`` flags so that existing
+scripts and documentation continue to work unchanged.
 
-    # Download directly from MT5 (requires .env credentials)
-    python training/train_and_backtest.py --from-mt5
+New dedicated commands (preferred):
+------------------------------------
+    # Train only
+    python -m training.train --csv data/XAUUSD.m_M15_historical.csv
 
-    # Skip LSTM (faster, no GPU required)
-    python training/train_and_backtest.py --csv data/XAUUSD_M15_historical.csv --skip-lstm
+    # Backtest only
+    python -m training.backtest --csv data/XAUUSD.m_M15_historical.csv \
+        --mode compare --initial-capital 400
 
-    # Backtest only — load saved models, skip retraining (~1-5 minutes)
-    python -m training.train_and_backtest --csv data/XAUUSD_M15_historical.csv --backtest-only --initial-capital 400
+Legacy combined command:
+------------------------
+    python -m training.train_and_backtest \
+        --csv data/XAUUSD.m_M15_historical.csv --initial-capital 400
+
+    python -m training.train_and_backtest \
+        --csv data/XAUUSD.m_M15_historical.csv --backtest-only --initial-capital 400
 """
 
 import argparse
 import logging
 import os
 import sys
-from datetime import datetime
-from typing import Any, Dict, Tuple
 
 # Load .env before anything else
 from dotenv import load_dotenv
 load_dotenv()
-
-import pandas as pd
-import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,10 +49,16 @@ logging.basicConfig(
 logger = logging.getLogger("train_and_backtest")
 
 # ---------------------------------------------------------------------------
-# Data split boundaries
+# Re-export shared helpers for backward compatibility
 # ---------------------------------------------------------------------------
-TRAIN_END = "2024-06-30"
-VALID_END = "2025-06-30"
+from training.data_utils import (       # noqa: F401  (public API)
+    TRAIN_END, VALID_END,
+    load_csv, download_from_mt5, split_data,
+)
+from training.backtest import (         # noqa: F401
+    run_strategy_only as run_strategy_backtest,
+    format_report as format_strategy_report,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +67,8 @@ VALID_END = "2025-06-30"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train AI models and run strategy backtest on historical data"
+        description="Train AI models and run strategy backtest on historical data "
+                    "(legacy combined script — see training/train.py and training/backtest.py)"
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
@@ -77,15 +81,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Download data directly from MetaTrader 5 (requires .env credentials)",
     )
-    parser.add_argument(
-        "--symbol", default="XAUUSD", help="Symbol (default: XAUUSD)"
-    )
-    parser.add_argument(
-        "--timeframe", default="M15", help="Timeframe (default: M15)"
-    )
-    parser.add_argument(
-        "--start", default="2020-01-01", help="Start date when using --from-mt5"
-    )
+    parser.add_argument("--symbol",    default="XAUUSD", help="Symbol (default: XAUUSD)")
+    parser.add_argument("--timeframe", default="M15",    help="Timeframe (default: M15)")
+    parser.add_argument("--start",     default="2020-01-01",
+                        help="Start date when using --from-mt5")
     parser.add_argument(
         "--model-dir",
         default=os.getenv("MODEL_DIR", "saved_models"),
@@ -107,362 +106,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip training; load saved models from --model-dir and run backtest only",
     )
+    parser.add_argument(
+        "--no-strategy-features",
+        action="store_true",
+        help="Do NOT include strategy signals as training features "
+             "(faster but lower quality; default: strategy features ON)",
+    )
     return parser.parse_args()
 
 
 # ---------------------------------------------------------------------------
-# Data loading helpers
-# ---------------------------------------------------------------------------
-
-def load_csv(path: str) -> pd.DataFrame:
-    """Load a CSV produced by download_mt5_data.py."""
-    logger.info(f"Loading data from {path} …")
-    df = pd.read_csv(path, index_col=0, parse_dates=True)
-    df.index.name = "datetime"
-    required = {"open", "high", "low", "close"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"CSV is missing columns: {missing}")
-    df.sort_index(inplace=True)
-    logger.info(f"Loaded {len(df):,} rows — {df.index[0]} → {df.index[-1]}")
-    return df
-
-
-def download_from_mt5(symbol: str, timeframe: str, start: str) -> pd.DataFrame:
-    """Download data directly from MT5 (reuses logic from download_mt5_data.py)."""
-    # Import here to avoid hard dependency when using --csv
-    from training.download_mt5_data import connect_mt5, download_data
-
-    if not connect_mt5():
-        sys.exit(1)
-
-    try:
-        import MetaTrader5 as mt5
-
-        start_dt = datetime.strptime(start, "%Y-%m-%d")
-        end_dt = datetime.now()
-        df = download_data(symbol, timeframe, start_dt, end_dt)
-
-        if df.empty:
-            logger.error("No data downloaded from MT5.")
-            sys.exit(1)
-
-        return df
-    finally:
-        mt5.shutdown()
-        logger.info("MT5 connection closed.")
-
-
-# ---------------------------------------------------------------------------
-# Split helpers
-# ---------------------------------------------------------------------------
-
-def split_data(
-    df: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Return (train, validation, backtest) DataFrames."""
-    train = df[df.index <= TRAIN_END]
-    valid = df[(df.index > TRAIN_END) & (df.index <= VALID_END)]
-    backtest = df[df.index > VALID_END]
-
-    logger.info(
-        f"Data split:\n"
-        f"  Training   : {len(train):>7,} rows  {train.index[0].date()} → {train.index[-1].date()}\n"
-        f"  Validation : {len(valid):>7,} rows  {valid.index[0].date()} → {valid.index[-1].date()}\n"
-        f"  Backtest   : {len(backtest):>7,} rows  {backtest.index[0].date()} → {backtest.index[-1].date()}"
-    )
-    return train, valid, backtest
-
-
-# ---------------------------------------------------------------------------
-# Training
-# ---------------------------------------------------------------------------
-
-def run_training(
-    train_df: pd.DataFrame,
-    model_dir: str,
-    skip_lstm: bool,
-) -> Tuple[Any, Dict[str, Any]]:
-    """Train all models on *train_df* and save them. Returns (trainer, results)."""
-    from training.trainer import Trainer
-
-    logger.info("=" * 60)
-    logger.info("PHASE 1 — TRAINING")
-    logger.info("=" * 60)
-
-    trainer = Trainer(model_dir=model_dir)
-    results = trainer.train_all_models(train_df, skip_lstm=skip_lstm)
-    trainer.save_all_models()
-    trainer.print_summary()
-    return trainer, results
-
-
-# ---------------------------------------------------------------------------
-# Validation (AI models)
-# ---------------------------------------------------------------------------
-
-def run_validation(
-    trainer: Any,
-    valid_df: pd.DataFrame,
-    initial_capital: float,
-) -> Dict[str, Any]:
-    """Run the trained predictor over the validation period."""
-    from training.backtester import Backtester
-
-    logger.info("=" * 60)
-    logger.info("PHASE 2 — VALIDATION (AI models)")
-    logger.info("=" * 60)
-
-    predictor = trainer.get_market_predictor()
-    backtester = Backtester(predictor=predictor, initial_capital=initial_capital)
-
-    try:
-        report = backtester.run(valid_df, symbol="XAUUSD")
-        logger.info(backtester.format_report(report))
-        return report
-    except Exception as e:
-        logger.warning(f"Validation backtest failed: {e}")
-        return {}
-
-
-# ---------------------------------------------------------------------------
-# Strategy backtest (out-of-sample)
-# ---------------------------------------------------------------------------
-
-def run_strategy_backtest(
-    backtest_df: pd.DataFrame,
-    symbol: str,
-    initial_capital: float,
-    predictor=None,  # optional MarketPredictor for AI+Strategy blending
-) -> Tuple[Dict[str, Any], list]:
-    """
-    Run all 10 strategies via StrategyBrain on the out-of-sample backtest data
-    and simulate a simple equity curve based on consensus signals.
-
-    When *predictor* is supplied the backtest mirrors live_bot.py behaviour:
-    each bar first queries the AI ensemble (LSTM + RF + XGBoost) via
-    ``predictor.predict()``, then combines the result with the strategy
-    consensus through ``brain.analyze_with_ai()``.  If the predictor is
-    unavailable or raises an exception the loop falls back to the
-    strategy-only ``brain.analyze_joint()`` path transparently.
-    """
-    logger.info("=" * 60)
-    logger.info("PHASE 3 — STRATEGY BACKTEST (out-of-sample)")
-    logger.info("=" * 60)
-
-    from strategies import (
-        StrategyBrain,
-        StrategyConfig,
-        SignalType,
-        MovingAverageCrossover,
-        EMAcrossoverStrategy,
-        RSIStrategy,
-        MACDStrategy,
-        BollingerBandsStrategy,
-        MeanReversionStrategy,
-        BreakoutStrategy,
-        StochasticStrategy,
-        SMCICTStrategy,
-        ITS8OSStrategy,
-    )
-
-    timeframe = "M15"
-    brain = StrategyBrain(config={
-        "min_strategies_required": 2,
-        "consensus_threshold": 0.6,
-        "performance_weight": 0.4,
-        "confidence_weight": 0.6,
-    })
-
-    strategies = [
-        MovingAverageCrossover(StrategyConfig(name="MA_Crossover", symbol=symbol, timeframe=timeframe)),
-        EMAcrossoverStrategy(StrategyConfig(name="EMA_Crossover", symbol=symbol, timeframe=timeframe)),
-        RSIStrategy(StrategyConfig(name="RSI", symbol=symbol, timeframe=timeframe)),
-        MACDStrategy(StrategyConfig(name="MACD", symbol=symbol, timeframe=timeframe)),
-        BollingerBandsStrategy(StrategyConfig(name="Bollinger", symbol=symbol, timeframe=timeframe)),
-        MeanReversionStrategy(StrategyConfig(name="MeanReversion", symbol=symbol, timeframe=timeframe)),
-        BreakoutStrategy(StrategyConfig(name="Breakout", symbol=symbol, timeframe=timeframe)),
-        StochasticStrategy(StrategyConfig(name="Stochastic", symbol=symbol, timeframe=timeframe)),
-        SMCICTStrategy(StrategyConfig(name="SMC_ICT", symbol=symbol, timeframe=timeframe)),
-        ITS8OSStrategy(StrategyConfig(name="ITS8OS", symbol=symbol, timeframe=timeframe)),
-    ]
-
-    for s in strategies:
-        s.start()
-        brain.register_strategy(s)
-
-    # Walk-forward simulation over the backtest period
-    close = backtest_df["close"].values
-    equity = initial_capital
-    equity_curve = [equity]
-    trade_returns = []
-    signals_log = []
-
-    min_history = 50  # warm-up candles
-
-    # Pre-convert all rows to dicts once for efficiency
-    cols = ["open", "high", "low", "close"]
-    if "volume" in backtest_df.columns:
-        cols.append("volume")
-    sub = backtest_df[cols].copy()
-    if "volume" not in sub.columns:
-        sub["volume"] = 0.0
-    all_bars = sub[["open", "high", "low", "close", "volume"]].astype(float).to_dict("records")
-
-    for i in range(min_history, len(backtest_df) - 1):
-        bar_dict = {
-            **all_bars[i],
-            "symbol": symbol,
-            "prices": all_bars[: i + 1],
-        }
-
-        # Try AI + Strategies (like live_bot.py does)
-        ai_result = None
-        if predictor is not None:
-            try:
-                window = backtest_df.iloc[: i + 1]
-                ai_result = predictor.predict(window, symbol=symbol)
-            except Exception as exc:
-                logger.debug("AI prediction failed at bar %d: %s", i, exc)
-                ai_result = None
-
-        try:
-            if ai_result is not None:
-                result = brain.analyze_with_ai(bar_dict, ai_result)
-            else:
-                result = brain.analyze_joint(bar_dict)
-        except Exception:
-            result = None
-
-        direction = 0
-        signal_label = "HOLD"
-
-        if result and result.get("consensus_reached") and result.get("consensus_signal"):
-            sig = result["consensus_signal"]
-            if sig.signal_type == SignalType.BUY:
-                direction = 1
-                signal_label = "BUY"
-            elif sig.signal_type == SignalType.SELL:
-                direction = -1
-                signal_label = "SELL"
-
-        actual_return = (close[i + 1] - close[i]) / close[i]
-        trade_ret = direction * actual_return
-        trade_returns.append(trade_ret)
-        equity *= 1 + trade_ret
-        equity_curve.append(equity)
-
-        signals_log.append(
-            {
-                "datetime": backtest_df.index[i],
-                "signal": signal_label,
-                "close": close[i],
-                "actual_return": actual_return,
-                "trade_return": trade_ret,
-                "equity": equity,
-            }
-        )
-
-    equity_arr = np.array(equity_curve)
-    trade_arr = np.array(trade_returns)
-
-    # win / loss
-    trades = [t for t in trade_returns if t != 0]
-    wins = [t for t in trades if t > 0]
-    losses = [t for t in trades if t < 0]
-    win_rate = len(wins) / len(trades) if trades else 0.0
-    gross_profit = sum(wins) if wins else 0.0
-    gross_loss = abs(sum(losses)) if losses else 0.0
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
-
-    # max drawdown
-    peak = np.maximum.accumulate(equity_arr)
-    drawdown = (equity_arr - peak) / peak
-    max_dd = float(drawdown.min()) * 100
-
-    total_return = (equity_arr[-1] - initial_capital) / initial_capital * 100
-    sharpe = (
-        float(np.mean(trade_arr) / np.std(trade_arr) * np.sqrt(252 * 96))
-        if np.std(trade_arr) > 0
-        else 0.0
-    )  # 96 M15 candles per day
-
-    # per-strategy performance (from brain stats)
-    brain_stats = brain.get_statistics()
-
-    report = {
-        "symbol": symbol,
-        "period_start": str(backtest_df.index[min_history].date()),
-        "period_end": str(backtest_df.index[-1].date()),
-        "total_candles": len(backtest_df),
-        "simulated_candles": len(trade_returns),
-        "total_trades": len(trades),
-        "wins": len(wins),
-        "losses": len(losses),
-        "win_rate": win_rate,
-        "profit_factor": profit_factor,
-        "max_drawdown_pct": max_dd,
-        "total_return_pct": float(total_return),
-        "initial_capital": initial_capital,
-        "final_equity": float(equity_arr[-1]),
-        "sharpe_ratio": sharpe,
-        "brain_stats": brain_stats,
-    }
-
-    return report, signals_log
-
-
-# ---------------------------------------------------------------------------
-# Report formatting
-# ---------------------------------------------------------------------------
-
-def format_strategy_report(report: Dict[str, Any]) -> str:
-    pf = report["profit_factor"]
-    pf_str = f"{pf:.3f}" if pf != float("inf") else "∞"
-    lines = [
-        "",
-        "=" * 60,
-        f"STRATEGY BACKTEST REPORT — {report['symbol']}",
-        "=" * 60,
-        f"Period          : {report['period_start']} → {report['period_end']}",
-        f"Candles tested  : {report['simulated_candles']:,} / {report['total_candles']:,}",
-        "",
-        "Trade statistics:",
-        f"  Total trades  : {report['total_trades']:,}",
-        f"  Wins / Losses : {report['wins']} / {report['losses']}",
-        f"  Win rate      : {report['win_rate']:.2%}",
-        f"  Profit factor : {pf_str}",
-        "",
-        "Portfolio performance:",
-        f"  Initial capital : ${report['initial_capital']:,.2f}",
-        f"  Final equity    : ${report['final_equity']:,.2f}",
-        f"  Total return    : {report['total_return_pct']:+.2f}%",
-        f"  Sharpe ratio    : {report['sharpe_ratio']:.3f}",
-        f"  Max drawdown    : {report['max_drawdown_pct']:.2f}%",
-        "=" * 60,
-        "",
-    ]
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Entry point
+# Entry point — thin wrapper delegating to train.py / backtest.py logic
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     args = parse_args()
 
-    # ── Step 1: Load data ────────────────────────────────────────────────
+    # Step 1: Load data
     if args.from_mt5:
         df = download_from_mt5(args.symbol, args.timeframe, args.start)
     else:
         df = load_csv(args.csv)
 
-    # ── Step 2: Split data ───────────────────────────────────────────────
+    # Step 2: Split data
     train_df, valid_df, backtest_df = split_data(df)
 
     if args.backtest_only:
-        # Load saved models instead of training
         from training.trainer import Trainer
 
         logger.info("=" * 60)
@@ -470,35 +139,65 @@ def main() -> None:
         logger.info("=" * 60)
         trainer = Trainer(model_dir=args.model_dir)
         trainer.load_all_models()
-        train_results = {}  # no training results in backtest-only mode
     else:
         if len(train_df) < 200:
             logger.error("Training set too small (< 200 candles). Check your data.")
             sys.exit(1)
 
-        # ── Step 3: Train AI models ──────────────────────────────────────────
-        trainer, train_results = run_training(train_df, args.model_dir, args.skip_lstm)
+        from training.trainer import Trainer
 
-    # ── Step 4: Validate on validation period ────────────────────────────
+        logger.info("=" * 60)
+        logger.info("PHASE 1 — TRAINING")
+        logger.info("=" * 60)
+
+        add_strategy_features = not args.no_strategy_features
+        trainer = Trainer(model_dir=args.model_dir)
+        trainer.train_all_models(
+            train_df,
+            skip_lstm=args.skip_lstm,
+            add_strategy_features=add_strategy_features,
+        )
+        trainer.save_all_models()
+        trainer.print_summary()
+
+    # Step 3: Validate on validation period
     if len(valid_df) >= 102:
-        val_report = run_validation(trainer, valid_df, args.initial_capital)
+        logger.info("=" * 60)
+        logger.info("PHASE 2 — VALIDATION (AI models)")
+        logger.info("=" * 60)
+        from training.backtester import Backtester
+
+        predictor = trainer.get_market_predictor()
+        backtester = Backtester(predictor=predictor, initial_capital=args.initial_capital)
+        try:
+            val_report = backtester.run(valid_df, symbol=args.symbol)
+            logger.info(backtester.format_report(val_report))
+        except Exception as e:
+            logger.warning(f"Validation backtest failed: {e}")
+            val_report = {}
     else:
         logger.warning("Validation set too small — skipping validation phase.")
         val_report = {}
 
-    # ── Step 5: Strategy backtest (out-of-sample) ────────────────────────
+    # Step 4: Strategy backtest (out-of-sample)
     if len(backtest_df) >= 52:
+        from training.backtest import run_combined, format_report
+
         predictor = trainer.get_market_predictor()
-        strategy_report, signals = run_strategy_backtest(
-            backtest_df, args.symbol, args.initial_capital, predictor=predictor
+        strategy_report = run_combined(
+            backtest_df,
+            symbol=args.symbol,
+            initial_capital=args.initial_capital,
+            predictor=predictor,
+            consensus_threshold=0.6,
+            min_confidence=0.5,
         )
-        logger.info(format_strategy_report(strategy_report))
+        logger.info(format_report(strategy_report))
     else:
         logger.warning("Backtest set too small — skipping strategy backtest phase.")
         strategy_report = {}
-        signals = []
 
-    # ── Step 6: Summary ──────────────────────────────────────────────────
+    # Step 5: Summary
     logger.info("=" * 60)
     logger.info("PIPELINE COMPLETE")
     logger.info("=" * 60)
@@ -514,7 +213,7 @@ def main() -> None:
             f"max DD: {strategy_report.get('max_drawdown_pct', 0):.2f}%"
         )
     if not args.backtest_only:
-        logger.info(f"Models saved → {args.model_dir}/")
+        logger.info(f"Models saved -> {args.model_dir}/")
 
 
 if __name__ == "__main__":

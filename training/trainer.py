@@ -70,6 +70,7 @@ class Trainer:
         self,
         data: pd.DataFrame,
         skip_lstm: bool = False,
+        add_strategy_features: bool = False,
     ) -> Dict[str, Any]:
         """
         Train LSTM, Random Forest, and XGBoost on *data*.
@@ -78,6 +79,8 @@ class Trainer:
         ----------
         data      : OHLCV DataFrame
         skip_lstm : set True to skip LSTM if torch is not available
+        add_strategy_features : when True, walk-forward strategy signals are
+            added as extra features during training (improves quality)
 
         Returns
         -------
@@ -88,7 +91,7 @@ class Trainer:
         # Random Forest
         try:
             logger.info("Training Random Forest …")
-            rf_results = self._get_rf().train(data)
+            rf_results = self._get_rf().train(data, add_strategy_features=add_strategy_features)
             results["random_forest"] = rf_results
             rf_acc = rf_results.get("accuracy")
             logger.info(f"Random Forest — accuracy: {rf_acc:.3f}" if isinstance(rf_acc, float) else f"Random Forest — accuracy: {rf_acc}")
@@ -99,7 +102,7 @@ class Trainer:
         # XGBoost
         try:
             logger.info("Training XGBoost …")
-            xgb_results = self._get_xgb().train(data)
+            xgb_results = self._get_xgb().train(data, add_strategy_features=add_strategy_features)
             results["xgboost"] = xgb_results
             xgb_acc = xgb_results.get("accuracy")
             logger.info(f"XGBoost — accuracy: {xgb_acc:.3f}" if isinstance(xgb_acc, float) else f"XGBoost — accuracy: {xgb_acc}")
@@ -111,7 +114,7 @@ class Trainer:
         if not skip_lstm:
             try:
                 logger.info("Training LSTM (may take a while) …")
-                lstm_results = self._get_lstm().train(data)
+                lstm_results = self._get_lstm().train(data, add_strategy_features=add_strategy_features)
                 results["lstm"] = lstm_results
                 val_loss = lstm_results.get("val_loss")
                 logger.info(f"LSTM — val_loss: {val_loss:.4f}" if isinstance(val_loss, float) else f"LSTM — val_loss: {val_loss}")
