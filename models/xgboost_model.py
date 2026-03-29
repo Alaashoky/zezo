@@ -41,10 +41,16 @@ class XGBoostModel:
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _prepare(self, data: pd.DataFrame, add_target: bool = True):
+    def _prepare(
+        self,
+        data: pd.DataFrame,
+        add_target: bool = True,
+        add_strategy_features: bool = False,
+        strategy_signals: Optional[Dict[str, Any]] = None,
+    ):
         from models.feature_engineering import build_features, get_feature_columns
 
-        feat_df = build_features(data, add_target=add_target)
+        feat_df = build_features(data, add_target=add_target, add_strategy_features=add_strategy_features)
         if add_target:
             self._feature_cols = get_feature_columns(feat_df)
             X = feat_df[self._feature_cols]
@@ -52,14 +58,24 @@ class XGBoostModel:
             return X, y
         else:
             cols = self._feature_cols or get_feature_columns(feat_df)
+            # Populate strategy feature columns from provided signals or zeros
+            for col in cols:
+                if col not in feat_df.columns and col.startswith("strategy_"):
+                    feat_df[col] = strategy_signals.get(col, 0) if strategy_signals else 0
             available = [c for c in cols if c in feat_df.columns]
             return feat_df[available], None
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def train(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def train(self, data: pd.DataFrame, add_strategy_features: bool = False) -> Dict[str, Any]:
         """
         Train XGBoost on OHLCV data.
+
+        Parameters
+        ----------
+        data : OHLCV DataFrame
+        add_strategy_features : when True, include walk-forward strategy signals
+            as additional features (improves quality; slower to prepare)
 
         Returns
         -------
@@ -68,8 +84,9 @@ class XGBoostModel:
         if not _XGB_AVAILABLE:
             raise ImportError("xgboost is required — pip install xgboost>=2.0.0")
 
+        self._add_strategy_features = add_strategy_features
         logger.info("XGBoost: preparing data …")
-        X, y = self._prepare(data, add_target=True)
+        X, y = self._prepare(data, add_target=True, add_strategy_features=add_strategy_features)
 
         n = len(X)
         n_test = max(1, int(n * 0.15))
@@ -123,9 +140,16 @@ class XGBoostModel:
         logger.info(f"XGBoost trained — accuracy: {acc:.3f}, F1: {f1:.3f}")
         return self._eval_results
 
-    def predict(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def predict(self, data: pd.DataFrame, strategy_signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Predict direction for the most recent candle.
+
+        Parameters
+        ----------
+        data : OHLCV DataFrame
+        strategy_signals : optional dict mapping strategy feature column names to
+            their current values.  Required when the model was trained with
+            ``add_strategy_features=True``.
 
         Returns
         -------
@@ -136,7 +160,7 @@ class XGBoostModel:
         if not self._is_trained or self.model is None:
             raise RuntimeError("Model is not trained. Call train() first.")
 
-        X, _ = self._prepare(data, add_target=False)
+        X, _ = self._prepare(data, add_target=False, strategy_signals=strategy_signals)
         probs = self.model.predict_proba(X.iloc[[-1]])[0]
         pred_class = int(np.argmax(probs))
         return {
@@ -163,7 +187,12 @@ class XGBoostModel:
             raise RuntimeError("Nothing to save — model is not trained")
         os.makedirs(path, exist_ok=True)
         joblib.dump(
-            {"model": self.model, "feature_cols": self._feature_cols, "config": self.config},
+            {
+                "model": self.model,
+                "feature_cols": self._feature_cols,
+                "config": self.config,
+                "add_strategy_features": getattr(self, "_add_strategy_features", False),
+            },
             os.path.join(path, self.MODEL_FILE),
         )
         logger.info(f"XGBoost model saved to {path}")
@@ -176,5 +205,6 @@ class XGBoostModel:
         self.model = data["model"]
         self._feature_cols = data["feature_cols"]
         self.config = data["config"]
+        self._add_strategy_features = data.get("add_strategy_features", False)
         self._is_trained = True
         logger.info(f"XGBoost model loaded from {path}")

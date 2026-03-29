@@ -10,6 +10,22 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+# ── strategy name → feature column suffix mapping ───────────────────────────
+# Used by _compute_strategy_signals() and by backtest.py to build the
+# strategy_signals dict passed to model.predict().
+STRATEGY_NAME_MAP = {
+    "MA_Crossover":   "ma_crossover",
+    "EMA_Crossover":  "ema_crossover",
+    "RSI":            "rsi",
+    "MACD":           "macd",
+    "Bollinger":      "bollinger",
+    "MeanReversion":  "mean_reversion",
+    "Breakout":       "breakout",
+    "Stochastic":     "stochastic",
+    "SMC_ICT":        "smc_ict",
+    "ITS8OS":         "its8os",
+}
+
 logger = logging.getLogger(__name__)
 
 # ── required OHLCV columns ───────────────────────────────────────────────────
@@ -95,11 +111,127 @@ def compute_obv(df: pd.DataFrame) -> pd.Series:
 
 # ── main feature builder ─────────────────────────────────────────────────────
 
+def _compute_strategy_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Walk-forward computation of strategy signals for every row in *df*.
+
+    Creates fresh strategy instances, iterates through all rows calling
+    each strategy's ``on_bar()`` once per row (O(N * 10)), and returns a
+    DataFrame with the following columns:
+
+      strategy_ma_crossover, strategy_ema_crossover, strategy_rsi,
+      strategy_macd, strategy_bollinger, strategy_mean_reversion,
+      strategy_breakout, strategy_stochastic, strategy_smc_ict,
+      strategy_its8os, strategy_consensus, strategy_consensus_confidence,
+      strategy_buy_count, strategy_sell_count
+
+    Signal values: 1 = BUY, -1 = SELL, 0 = HOLD / no signal.
+
+    Only called during training (controlled by ``add_strategy_features``).
+    """
+    from strategies import (
+        StrategyConfig, SignalType,
+        MovingAverageCrossover, EMAcrossoverStrategy, RSIStrategy,
+        MACDStrategy, BollingerBandsStrategy, MeanReversionStrategy,
+        BreakoutStrategy, StochasticStrategy, SMCICTStrategy, ITS8OSStrategy,
+    )
+
+    symbol = "XAUUSD"
+    timeframe = "M15"
+
+    # Map from config name → (feature suffix, strategy instance)
+    strategy_instances = {
+        "MA_Crossover":  MovingAverageCrossover(StrategyConfig("MA_Crossover",  symbol, timeframe)),
+        "EMA_Crossover": EMAcrossoverStrategy(  StrategyConfig("EMA_Crossover", symbol, timeframe)),
+        "RSI":           RSIStrategy(           StrategyConfig("RSI",           symbol, timeframe)),
+        "MACD":          MACDStrategy(          StrategyConfig("MACD",          symbol, timeframe)),
+        "Bollinger":     BollingerBandsStrategy(StrategyConfig("Bollinger",     symbol, timeframe)),
+        "MeanReversion": MeanReversionStrategy( StrategyConfig("MeanReversion", symbol, timeframe)),
+        "Breakout":      BreakoutStrategy(      StrategyConfig("Breakout",      symbol, timeframe)),
+        "Stochastic":    StochasticStrategy(    StrategyConfig("Stochastic",    symbol, timeframe)),
+        "SMC_ICT":       SMCICTStrategy(        StrategyConfig("SMC_ICT",       symbol, timeframe)),
+        "ITS8OS":        ITS8OSStrategy(        StrategyConfig("ITS8OS",        symbol, timeframe)),
+    }
+    for s in strategy_instances.values():
+        s.start()
+
+    n = len(df)
+    # Pre-build bar records (faster than per-row dict construction)
+    cols = ["open", "high", "low", "close"]
+    sub = df[cols].copy()
+    if "volume" in df.columns:
+        sub["volume"] = df["volume"].values
+    else:
+        sub["volume"] = 0.0
+    bar_records = sub[["open", "high", "low", "close", "volume"]].astype(float).to_dict("records")
+
+    # Output arrays
+    individual = {suf: np.zeros(n, dtype=np.int8) for suf in STRATEGY_NAME_MAP.values()}
+    consensus_arr = np.zeros(n, dtype=np.int8)
+    conf_arr = np.zeros(n, dtype=np.float32)
+    buy_cnt_arr = np.zeros(n, dtype=np.int8)
+    sell_cnt_arr = np.zeros(n, dtype=np.int8)
+
+    logger.info("Computing strategy signals walk-forward (this may take a minute) …")
+
+    for i in range(n):
+        bar_dict = {
+            **bar_records[i],
+            "symbol": symbol,
+            "prices": bar_records[: i + 1],
+        }
+        buy_count = 0
+        sell_count = 0
+        for config_name, strategy in strategy_instances.items():
+            feat_key = STRATEGY_NAME_MAP[config_name]
+            try:
+                signal = strategy.on_bar(bar_dict)
+            except Exception:
+                signal = None
+            if signal is not None:
+                if signal.signal_type == SignalType.BUY:
+                    individual[feat_key][i] = 1
+                    buy_count += 1
+                elif signal.signal_type == SignalType.SELL:
+                    individual[feat_key][i] = -1
+                    sell_count += 1
+
+        buy_cnt_arr[i] = buy_count
+        sell_cnt_arr[i] = sell_count
+
+        # Simple majority consensus (threshold 60 %)
+        total = buy_count + sell_count
+        if total > 0:
+            buy_ratio = buy_count / total
+            sell_ratio = sell_count / total
+            if buy_ratio >= 0.6:
+                consensus_arr[i] = 1
+                conf_arr[i] = buy_ratio
+            elif sell_ratio >= 0.6:
+                consensus_arr[i] = -1
+                conf_arr[i] = sell_ratio
+
+        if (i + 1) % 10_000 == 0:
+            logger.info(f"  … processed {i + 1:,}/{n:,} rows")
+
+    logger.info("Strategy signal computation complete.")
+
+    result = pd.DataFrame(index=df.index)
+    for suf in STRATEGY_NAME_MAP.values():
+        result[f"strategy_{suf}"] = individual[suf]
+    result["strategy_consensus"] = consensus_arr
+    result["strategy_consensus_confidence"] = conf_arr
+    result["strategy_buy_count"] = buy_cnt_arr
+    result["strategy_sell_count"] = sell_cnt_arr
+    return result
+
+
 def build_features(
     df: pd.DataFrame,
     lag_periods: Optional[list] = None,
     add_target: bool = True,
     target_horizon: int = 1,
+    add_strategy_features: bool = False,
 ) -> pd.DataFrame:
     """
     Build a feature matrix from raw OHLCV data.
@@ -110,6 +242,9 @@ def build_features(
     lag_periods : list of integers — which lag periods to include (default [1,2,3,5])
     add_target : whether to append a target column for classification
     target_horizon : how many candles ahead to look for the target
+    add_strategy_features : when True, pre-compute signals from all 10 strategies
+        via walk-forward simulation and add them as extra feature columns.
+        Only used during training; slower but improves model quality.
 
     Returns
     -------
@@ -187,6 +322,15 @@ def build_features(
     feat["upper_wick"] = (df["high"] - df[["open", "close"]].max(axis=1)) / close.replace(0, np.nan)
     feat["lower_wick"] = (df[["open", "close"]].min(axis=1) - df["low"]) / close.replace(0, np.nan)
     feat["candle_direction"] = np.sign(df["close"] - df["open"])
+
+    # ── Strategy signal features (optional, training only) ────────────────────
+    if add_strategy_features:
+        try:
+            sig_df = _compute_strategy_signals(df)
+            for col in sig_df.columns:
+                feat[col] = sig_df[col].values
+        except Exception as e:
+            logger.warning(f"Strategy feature computation failed: {e}")
 
     # ── Target variable ───────────────────────────────────────────────────────
     if add_target:

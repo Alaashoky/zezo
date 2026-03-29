@@ -111,7 +111,7 @@ class MarketPredictor:
 
     # ── prediction ────────────────────────────────────────────────────────────
 
-    def predict(self, data: pd.DataFrame, symbol: str = "UNKNOWN") -> Dict[str, Any]:
+    def predict(self, data: pd.DataFrame, symbol: str = "UNKNOWN", strategy_signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Generate an ensemble prediction for the most recent candle.
 
@@ -119,6 +119,10 @@ class MarketPredictor:
         ----------
         data   : OHLCV DataFrame (at least `sequence_length` rows)
         symbol : trading symbol name
+        strategy_signals : optional dict mapping strategy feature column names to
+            their current signal values (e.g. ``{"strategy_rsi": 1, ...}``).
+            Pass this when the models were trained with ``add_strategy_features=True``
+            so that the same features are available during inference.
 
         Returns
         -------
@@ -136,7 +140,7 @@ class MarketPredictor:
             if model is None:
                 continue
             try:
-                pred = model.predict(data)
+                pred = model.predict(data, strategy_signals=strategy_signals)
                 model_preds[name] = pred
             except Exception as e:
                 logger.warning(f"Prediction failed for {name}: {e}")

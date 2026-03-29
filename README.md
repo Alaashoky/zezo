@@ -63,7 +63,12 @@ The CSV will be saved as `data/XAUUSD_M15_historical.csv`.
 
 ## Training + Backtest Pipeline
 
-Use `training/train_and_backtest.py` to train the AI models and run a full strategy backtest.
+The pipeline is split into two independent scripts:
+
+| Script | Purpose |
+|--------|---------|
+| `training/train.py` | Train AI models — run **once** |
+| `training/backtest.py` | Backtest with many settings — run **repeatedly** |
 
 ### Data split
 
@@ -73,26 +78,114 @@ Use `training/train_and_backtest.py` to train the AI models and run a full strat
 | **Validation** | 2024-07-01 → 2025-06-30 | 1 year |
 | **Backtest** | 2025-07-01 → present | ~9 months (out-of-sample) |
 
-### Run the pipeline
+---
+
+### Step 1 — Train
 
 ```bash
-# Using a pre-downloaded CSV
-python training/train_and_backtest.py --csv data/XAUUSD_M15_historical.csv
-
-# Download directly from MT5
-python training/train_and_backtest.py --from-mt5
+# Train RF + XGB + LSTM with strategy signals as extra features (default)
+python -m training.train --csv data/XAUUSD.m_M15_historical.csv
 
 # Skip LSTM (faster, no GPU required)
-python training/train_and_backtest.py --csv data/XAUUSD_M15_historical.csv --skip-lstm
+python -m training.train --csv data/XAUUSD.m_M15_historical.csv --skip-lstm
+
+# Train without strategy features (legacy mode, faster)
+python -m training.train --csv data/XAUUSD.m_M15_historical.csv --no-strategy-features
+
+# Download directly from MT5
+python -m training.train --from-mt5
 ```
 
-The pipeline:
+What `train.py` does:
 1. Loads and splits data into train / validation / backtest periods
-2. Trains LSTM, RandomForest, and XGBoost on the training period
-3. Validates AI model performance on the validation period
-4. Runs all 10 strategies via StrategyBrain on the out-of-sample backtest period
-5. Generates a performance report (win rate, profit factor, max drawdown, total return)
-6. Saves trained models to `saved_models/`
+2. Walk-forward computes all 10 strategy signals as training features (unless `--no-strategy-features`)
+3. Trains LSTM, RandomForest, and XGBoost on the training period
+4. Saves trained models to `saved_models/`
+5. Prints a training summary
+
+---
+
+### Step 2 — Backtest
+
+```bash
+# Strategy-only mode (10 strategies via StrategyBrain, no AI)
+python -m training.backtest --csv data/XAUUSD.m_M15_historical.csv \
+    --mode strategy-only --initial-capital 400
+
+# AI-only mode (LSTM + RF + XGB ensemble)
+python -m training.backtest --csv data/XAUUSD.m_M15_historical.csv \
+    --mode ai-only --initial-capital 400
+
+# Combined mode — AI + strategies (default)
+python -m training.backtest --csv data/XAUUSD.m_M15_historical.csv \
+    --mode combined --initial-capital 400 --ai-weight 0.5
+
+# Compare all three modes side by side
+python -m training.backtest --csv data/XAUUSD.m_M15_historical.csv \
+    --mode compare --initial-capital 400
+```
+
+#### Backtest arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--csv FILE` / `--from-mt5` | — | Data source |
+| `--mode` | `combined` | `strategy-only`, `ai-only`, `combined`, `compare` |
+| `--initial-capital` | `10000` | Starting equity |
+| `--model-dir` | `saved_models` | Directory with saved models |
+| `--ai-weight` | `0.3` | AI signal weight in combined mode |
+| `--consensus-threshold` | `0.6` | Strategy consensus required (0–1) |
+| `--min-confidence` | `0.5` | Minimum AI confidence to trade |
+
+#### Mode explanations
+
+| Mode | Description |
+|------|-------------|
+| **strategy-only** | Uses only the 10 strategies via `brain.analyze_joint()` — no AI |
+| **ai-only** | Uses only the AI ensemble (LSTM + RF + XGB) |
+| **combined** | Blends AI + strategies via `brain.analyze_with_ai()` — mirrors `live_bot.py` |
+| **compare** | Runs all three modes and prints a comparison table |
+
+---
+
+### Legacy combined script (backward compatible)
+
+```bash
+# Full pipeline (train + validate + backtest)
+python -m training.train_and_backtest --csv data/XAUUSD.m_M15_historical.csv
+
+# Backtest only (load saved models, skip retraining)
+python -m training.train_and_backtest \
+    --csv data/XAUUSD.m_M15_historical.csv --backtest-only --initial-capital 400
+```
+
+---
+
+## Strategy Signals as AI Training Features
+
+The AI models (RF, XGB, LSTM) are now trained with the 10 strategy signals as
+additional features.  For each training candle the following columns are added
+to the feature matrix:
+
+| Feature | Description |
+|---------|-------------|
+| `strategy_ma_crossover` | MA Crossover signal (−1/0/1) |
+| `strategy_ema_crossover` | EMA Crossover signal |
+| `strategy_rsi` | RSI signal |
+| `strategy_macd` | MACD signal |
+| `strategy_bollinger` | Bollinger Bands signal |
+| `strategy_mean_reversion` | Mean Reversion signal |
+| `strategy_breakout` | Breakout signal |
+| `strategy_stochastic` | Stochastic signal |
+| `strategy_smc_ict` | SMC ICT signal |
+| `strategy_its8os` | ITS8OS signal |
+| `strategy_consensus` | Majority consensus (−1/0/1) |
+| `strategy_consensus_confidence` | Consensus confidence (0–1) |
+| `strategy_buy_count` | Number of strategies saying BUY (0–10) |
+| `strategy_sell_count` | Number of strategies saying SELL (0–10) |
+
+This teaches the AI **when the strategies are right vs wrong**, significantly
+improving signal quality.
 
 ---
 
@@ -108,10 +201,13 @@ zezo/
 ├── live_bot.py           ← Live trading bot
 ├── data/                 ← Historical CSV data (git-ignored except .gitkeep)
 ├── training/
-│   ├── trainer.py        ← AI model training orchestrator
-│   ├── backtester.py     ← Walk-forward backtester
-│   ├── download_mt5_data.py   ← MT5 historical data downloader
-│   └── train_and_backtest.py  ← Full training + backtest pipeline
+│   ├── data_utils.py          ← Shared data loading & splitting
+│   ├── train.py               ← Training-only pipeline (NEW)
+│   ├── backtest.py            ← Backtest-only pipeline (NEW)
+│   ├── train_and_backtest.py  ← Legacy combined wrapper
+│   ├── trainer.py             ← AI model training orchestrator
+│   ├── backtester.py          ← Walk-forward AI backtester
+│   └── download_mt5_data.py   ← MT5 historical data downloader
 ├── strategies/           ← 10 trading strategies + StrategyBrain
 ├── models/               ← LSTM, RandomForest, XGBoost, MarketPredictor
 ├── config/               ← ModelConfig, TradingConfig

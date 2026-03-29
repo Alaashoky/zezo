@@ -72,14 +72,17 @@ class LSTMModel:
     # ── feature / data helpers ────────────────────────────────────────────────
 
     def _prepare_data(
-        self, data: pd.DataFrame
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self,
+        data: pd.DataFrame,
+        add_strategy_features: bool = False,
+    ) -> tuple:
         """Build features, scale them, create sequences."""
         from models.feature_engineering import build_features, get_feature_columns
         from models.data_processor import DataProcessor
 
-        feat_df = build_features(data, add_target=True)
+        feat_df = build_features(data, add_target=True, add_strategy_features=add_strategy_features)
         feature_cols = get_feature_columns(feat_df)
+        self._feature_cols = feature_cols
         X_raw = feat_df[feature_cols].values
         y_raw = feat_df["target"].values
 
@@ -94,13 +97,15 @@ class LSTMModel:
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def train(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def train(self, data: pd.DataFrame, add_strategy_features: bool = False) -> Dict[str, Any]:
         """
         Train the LSTM on historical OHLCV data.
 
         Parameters
         ----------
         data : DataFrame with OHLCV columns
+        add_strategy_features : when True, include walk-forward strategy signals
+            as additional features (improves quality; slower to prepare)
 
         Returns
         -------
@@ -109,8 +114,9 @@ class LSTMModel:
         if not _TORCH_AVAILABLE:
             raise ImportError("torch is required — install with: pip install torch>=2.0.0")
 
+        self._add_strategy_features = add_strategy_features
         logger.info("LSTM: preparing data …")
-        X_seq, y_seq = self._prepare_data(data)
+        X_seq, y_seq = self._prepare_data(data, add_strategy_features=add_strategy_features)
 
         n = len(X_seq)
         n_val = max(1, int(n * 0.15))
@@ -128,6 +134,7 @@ class LSTMModel:
 
         self.input_size = X_seq.shape[2]
         num_classes = len(np.unique(y_seq))
+        self._num_classes = num_classes
 
         self.model = _LSTMNet(
             input_size=self.input_size,
@@ -190,9 +197,18 @@ class LSTMModel:
             "epochs_trained": len(self.train_losses),
         }
 
-    def predict(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def predict(self, data: pd.DataFrame, strategy_signals: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Predict direction for the most recent candle.
+
+        Parameters
+        ----------
+        data : OHLCV DataFrame (at least ``sequence_length`` rows)
+        strategy_signals : optional dict mapping strategy feature column names to
+            their current values.  When the model was trained with
+            ``add_strategy_features=True``, these values are broadcast across
+            every step of the input sequence so the model receives the same
+            feature set it was trained on.
 
         Returns
         -------
@@ -206,9 +222,19 @@ class LSTMModel:
         from models.feature_engineering import build_features, get_feature_columns
 
         feat_df = build_features(data, add_target=False)
-        feature_cols = get_feature_columns(feat_df)
-        X_raw = feat_df[feature_cols].values
-        X_scaled = self._processor.transform(pd.DataFrame(X_raw, columns=feature_cols))
+
+        # Resolve the expected feature columns (saved during training)
+        feature_cols = getattr(self, "_feature_cols", None) or get_feature_columns(feat_df)
+
+        # Populate strategy feature columns if the model expects them
+        strategy_cols = [c for c in feature_cols if c.startswith("strategy_")]
+        for col in strategy_cols:
+            if col not in feat_df.columns:
+                feat_df[col] = strategy_signals.get(col, 0) if strategy_signals else 0
+
+        available = [c for c in feature_cols if c in feat_df.columns]
+        X_raw = feat_df[available].values
+        X_scaled = self._processor.transform(pd.DataFrame(X_raw, columns=available))
 
         if len(X_scaled) < self.config.sequence_length:
             raise ValueError(
@@ -293,7 +319,16 @@ class LSTMModel:
         os.makedirs(path, exist_ok=True)
         torch.save(self.model.state_dict(), os.path.join(path, self.MODEL_FILE))
         joblib.dump(self._processor, os.path.join(path, "lstm_processor.pkl"))
-        joblib.dump({"input_size": self.input_size, "config": self.config}, os.path.join(path, "lstm_meta.pkl"))
+        joblib.dump(
+            {
+                "input_size": self.input_size,
+                "num_classes": getattr(self, "_num_classes", 3),
+                "config": self.config,
+                "feature_cols": getattr(self, "_feature_cols", []),
+                "add_strategy_features": getattr(self, "_add_strategy_features", False),
+            },
+            os.path.join(path, "lstm_meta.pkl"),
+        )
         logger.info(f"LSTM model saved to {path}")
 
     def load_model(self, path: str):
@@ -305,9 +340,12 @@ class LSTMModel:
         meta = joblib.load(os.path.join(path, "lstm_meta.pkl"))
         self.config = meta["config"]
         self.input_size = meta["input_size"]
+        self._num_classes = meta.get("num_classes", 3)
+        self._feature_cols = meta.get("feature_cols", [])
+        self._add_strategy_features = meta.get("add_strategy_features", False)
         self._processor = joblib.load(os.path.join(path, "lstm_processor.pkl"))
 
-        num_classes = 3  # HOLD / BUY / SELL
+        num_classes = self._num_classes
         self.model = _LSTMNet(
             input_size=self.input_size,
             hidden_size=self.config.hidden_size,
