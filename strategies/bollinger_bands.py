@@ -46,7 +46,7 @@ class BollingerBandsStrategy(BaseStrategy):
 
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute Bollinger Bands from OHLCV data dict."""
-        prices = data.get("prices") or data.get("close")
+        prices = data.get("close") or data.get("prices")
         if prices is None:
             return {"upper": None, "lower": None, "sma": None, "price": None}
 

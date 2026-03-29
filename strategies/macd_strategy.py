@@ -48,7 +48,7 @@ class MACDStrategy(BaseStrategy):
 
     def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Compute MACD from OHLCV data dict."""
-        prices = data.get("prices") or data.get("close")
+        prices = data.get("close") or data.get("prices")
         if prices is None:
             return {"macd": None, "signal_line": None, "histogram": None}
 
